@@ -138,7 +138,7 @@ and NPS vary with machine load, so only the node counts are used as a reference.
 Search is single-thread deterministic only with `Threads=1` (normal for SMP
 engines); use `Threads=1` if you need reproducible games.
 
-## 6. Changelog
+## 6. Changelog (useless)
 
 * **2026-11-12** — rolled back to the 2026-11-07 search; the 2026-11-09
   overhaul (continuation history, SEE pruning, LMR on losing captures,
