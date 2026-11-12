@@ -1423,10 +1423,10 @@ struct Search {
         return "cp " + std::to_string(score);
     }
 
-    void iterate(Board &b, NNUE &nn, int maxD, I64 tLimit, const std::vector<U64> &gameHist) {
+    void iterate(Board &b, NNUE &nn, int maxD, I64 softMs, I64 hardMsIn, const std::vector<U64> &gameHist) {
         startMs = nowMs();
-        limitMs = tLimit;
-        hardMs = tLimit;
+        limitMs = softMs;
+        hardMs = hardMsIn;
         // stop is cleared by the UCI thread before the search thread starts, so
         // a "stop" issued immediately after "go" cannot be lost here.
         nodes.store(0, std::memory_order_relaxed);
@@ -1485,13 +1485,19 @@ struct Search {
         }
         workers[0].idLoop(maxD, gameHist, true);
 
-        // Let helper threads burn remaining clock for extra depth
-        while (nowMs() - startMs < hardMs - 15 && !stop.load(std::memory_order_relaxed)) {
-            int bestD = 0;
-            for (int t = 0; t < numThreads; t++)
-                if (workers[t].completedDepth > bestD) bestD = workers[t].completedDepth;
-            if (bestD >= maxD) break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        // In a timed game the main worker owns the decision: once it has spent
+        // its soft budget the helpers must not keep the process thinking, or
+        // the clock savings from the soft limit are thrown away. Only
+        // depth/infinite runs (huge hard limit) let helpers burn extra time.
+        const bool timed = hardMs < ((I64)1 << 40);
+        if (!timed) {
+            while (nowMs() - startMs < hardMs - 15 && !stop.load(std::memory_order_relaxed)) {
+                int bestD = 0;
+                for (int t = 0; t < numThreads; t++)
+                    if (workers[t].completedDepth > bestD) bestD = workers[t].completedDepth;
+                if (bestD >= maxD) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
         }
         stop.store(true, std::memory_order_relaxed);
         for (auto &th : pool) th.join();
@@ -2038,13 +2044,29 @@ void Worker::idLoop(int maxD, const std::vector<U64> &gameHist, bool isMain) {
     if (isMain) S->ord.reset();
     int lastScore = 0;
     int startDepth = isMain ? 1 : (1 + (id % 3));
+    I64 lastIterMs = 0;
+    int stable = 0;                 // consecutive iterations with the same move
+    Move lastBest; lastBest.from = lastBest.to = -1;
 
     for (int depth = startDepth; depth <= maxD; depth++) {
         rootDepth = depth;
         I64 elapsed0 = Search::nowMs() - S->startMs;
-        // Use nearly all time: soft 96% before starting a new iteration
-        if (depth > 1 && elapsed0 >= S->limitMs * 96 / 100) break;
+        if (depth > 1) {
+            if (S->stop.load(std::memory_order_relaxed)) break;
+            // Soft limit: the point at which we stop *starting* new iterations.
+            // A best move that has survived several iterations is banked time.
+            I64 soft = S->limitMs;
+            if (stable >= 3) soft = soft * 3 / 5;
+            if (elapsed0 >= soft) break;
+            // Also refuse an iteration that cannot finish inside the hard cap:
+            // the next one usually costs 1.6-2.5x the previous one. Only for
+            // clock games — with "go movetime"/"go depth" soft == hard and the
+            // old abort-at-the-limit behaviour is what the caller asked for.
+            if (lastIterMs > 0 && S->hardMs > S->limitMs &&
+                elapsed0 + lastIterMs * 2 > S->hardMs) break;
+        }
         if (S->stop.load(std::memory_order_relaxed)) break;
+        I64 iterStart = Search::nowMs();
 
         selDepth = 0;
         int alpha = -INF_SCORE, beta = INF_SCORE;
@@ -2085,6 +2107,10 @@ void Worker::idLoop(int maxD, const std::vector<U64> &gameHist, bool isMain) {
         bestScoreRoot = score;
         bestRoot = bm;
         completedDepth = depth;
+        if (bm.from == lastBest.from && bm.to == lastBest.to) stable++;
+        else stable = 0;
+        lastBest = bm;
+        lastIterMs = Search::nowMs() - iterStart;
 
         if (isMain) {
             I64 elapsed = Search::nowMs() - S->startMs;
@@ -2181,6 +2207,51 @@ static bool verifyNNUE(Board &b, NNUE &nn) {
     return true;
 }
 
+// ------------------------------------------------------------- time manager --
+// A UCI clock is turned into two numbers:
+//   soft - stop *starting* new iterations here (this is the normal move time)
+//   hard - abort the search here (only reached when an iteration runs long)
+// Both are derived from the clock and increment, never copied from another
+// engine: spend a share of what is left, add part of the increment, keep the
+// rest banked, and never risk more than a third of the clock on one move.
+namespace {
+
+constexpr I64 kMoveOverheadMs = 30;      // GUI/OS round-trip reserve
+
+void planMoveTime(I64 timeLeft, int inc, int movestogo, int movesPlayed,
+                  I64 &soft, I64 &hard) {
+    I64 avail = timeLeft - kMoveOverheadMs;
+    if (avail <= 30) {                   // already inside the reserve: move now
+        soft = 1;
+        hard = 1;
+        return;
+    }
+    if (avail < 200) {                   // scramble: never bet the whole clock
+        soft = std::max<I64>(1, avail / 8);
+        hard = std::max<I64>(2, avail / 3);
+        return;
+    }
+
+    // Moves until the clock is refilled. Trust movestogo when the GUI sends it
+    // (it usually does not after the first move of a period); otherwise assume
+    // a full game and shorten the horizon as the game progresses.
+    int mtg = movestogo > 0 ? movestogo : std::max(12, 44 - movesPlayed / 2);
+
+    double share  = (double)avail / (double)(mtg + 1);
+    double target = share * 0.85 + (double)inc * 0.55;
+    double cap    = (double)avail * (mtg <= 2 ? 0.6 : 0.34);
+    if (target > cap) target = cap;
+    if (target < 4)   target = 4;
+
+    soft = (I64)target;
+    // Hard limit: enough slack for one expensive iteration, never the whole
+    // clock, so a surprise re-search still leaves time for the next move.
+    hard = (I64)std::min<double>((double)avail * 0.6, target * 2.2 + 20);
+    if (hard < soft) hard = soft;
+}
+
+} // namespace
+
 int main(int argc, char **argv) {
     initAttackTables();
     initMagic();
@@ -2195,6 +2266,7 @@ int main(int argc, char **argv) {
     Board board;
     parseFEN(board, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
     std::vector<U64> gameHist; // position keys of the current game (for repetition)
+    int gamePlies = 0;         // plies played in this game (time-manager hint)
     std::string netPath = "v16v2.nnue";
     bool netFromFile = false;   // default: use the net linked into the exe
 
@@ -2300,6 +2372,7 @@ int main(int argc, char **argv) {
             search.ttClear();
             for (int t = 0; t < search.numThreads; t++) search.workers[t].resetTables();
             gameHist.clear();
+            gamePlies = 0;
         } else if (token == "position") {
             joinSearch();
             ss >> token;
@@ -2348,6 +2421,7 @@ int main(int argc, char **argv) {
             }
             gameHist.clear();
             gameHist.push_back(board.key);
+            gamePlies = 0;
             while (ss >> token) {
                 if (token == "moves") continue;
                 Move m;
@@ -2358,14 +2432,15 @@ int main(int argc, char **argv) {
                 Undo u;
                 doMove(board, u, m);
                 gameHist.push_back(board.key);
+                gamePlies++;
             }
         } else if (token == "go") {
             int depth = MAX_PLY;
             bool depthGiven = false;   // "go depth"/"go mate": no wall-clock cap
-            I64 tLimit = 0;
             I64 nodesLimit = -1;
+            I64 softLimit = 0, hardLimit = 0;
             int mateIn = 0;
-            int wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0, movestogo = 30;
+            int wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0, movestogo = 0;
             bool infinite = false;
             while (ss >> token) {
                 if (token == "depth") { ss >> depth; depthGiven = true; }
@@ -2381,19 +2456,20 @@ int main(int argc, char **argv) {
             }
             if (mateIn > 0) depth = std::min(MAX_PLY, mateIn * 2);
             depth = std::max(1, std::min(depth, MAX_PLY));
-            if (movetime > 0) tLimit = movetime;
-            else if (wtime || btime) {
-                int myT = (board.side == WHITE) ? wtime : btime;
-                int myI = (board.side == WHITE) ? winc : binc;
-                tLimit = myT / std::max(1, movestogo) + myI / 2;
-                if (tLimit > myT * 4 / 5) tLimit = myT * 4 / 5;
-                if (tLimit < 10) tLimit = 10;
+            if (movetime > 0) {
+                softLimit = hardLimit = std::max<I64>(1, (I64)movetime - kMoveOverheadMs);
+            } else if (wtime > 0 || btime > 0) {
+                const int myT = (board.side == WHITE) ? wtime : btime;
+                const int myI = (board.side == WHITE) ? winc : binc;
+                planMoveTime((I64)myT, myI, movestogo, gamePlies / 2, softLimit, hardLimit);
             }
             // A depth-limited search must not be cut short by a wall-clock cap:
             // "go depth N" / "go mate N" run to that depth. Only a bare "go"
             // (no depth, no nodes, no clock) falls back to 5 s.
-            if (tLimit <= 0)
-                tLimit = (infinite || nodesLimit > 0 || depthGiven) ? ((I64)1 << 50) : 5000;
+            if (softLimit <= 0) {
+                softLimit = hardLimit =
+                    (infinite || nodesLimit > 0 || depthGiven) ? ((I64)1 << 50) : 5000;
+            }
             if (!nn.loaded) {
                 std::cout << "info string no net loaded - cannot search" << std::endl;
                 std::cout << "bestmove 0000" << std::endl;
@@ -2407,9 +2483,9 @@ int main(int argc, char **argv) {
             Board goBoard = board;
             std::vector<U64> goHist = gameHist;
             int goDepth = depth;
-            I64 goLimit = tLimit;
-            searchThread = std::thread([&, goBoard, goHist, goDepth, goLimit]() mutable {
-                search.iterate(goBoard, nn, goDepth, goLimit, goHist);
+            I64 goSoft = softLimit, goHard = hardLimit;
+            searchThread = std::thread([&, goBoard, goHist, goDepth, goSoft, goHard]() mutable {
+                search.iterate(goBoard, nn, goDepth, goSoft, goHard, goHist);
             });
         } else if (token == "eval") {
             nn.rootRefresh(board);

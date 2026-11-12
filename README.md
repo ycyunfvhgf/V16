@@ -88,6 +88,42 @@ normal use.
 Depth- and mate-limited searches run to the requested depth even if that takes
 minutes, so fixed-depth testing is no longer silently truncated.
 
+### Time management
+
+A clock budget is split into two numbers:
+
+* **soft** — the point where the engine stops *starting* new iterations. This is
+  the normal move time.
+* **hard** — the point where the search is aborted, only reached if one
+  iteration turns out much more expensive than the previous one.
+
+Per move, from the side's remaining clock `T` and increment `inc`:
+
+```
+avail  = T - 30 ms                     (GUI/OS reserve)
+mtg    = movestogo if the GUI sent it, else max(12, 44 - movesPlayed/2)
+soft   = min(avail * 0.34,  avail/(mtg+1) * 0.85 + inc * 0.55)
+hard   = min(avail * 0.60,  soft * 2.2 + 20)
+```
+
+Then, in the search:
+
+* a new iteration is not started once the soft limit is spent, nor if
+  `elapsed + 2 * lastIteration` would cross the hard limit;
+* if the best move has been unchanged for 3 iterations the soft limit is cut to
+  60%, deliberately banking time for a critical position later;
+* below 200 ms left the engine spends a small fixed slice (`avail/8`) instead of
+  a share, so it can never gamble the whole clock;
+* with `movetime` or `depth` there is no soft/hard split — those are fixed
+  requests and are honoured as given.
+
+Measured with a clock-driving harness (7 configurations, self-play, 1 thread):
+**no time forfeit**, including 2+1 with and without `movestogo`, 40/15 with
+`movestogo` sent only on move 1, 40/15 without `movestogo` at all, and 1+0 /
+10+0 sudden death. At real scale the first moves of 40/15 spend 13–25 s
+(≈18 s/move average, i.e. ~700 s of the 900 s period), and 2+1 spends
+1.9–2.9 s/move.
+
 ## 3. Opening books — CCRL
 
 **The engine has no internal book and never plays a book move.** That is
@@ -189,6 +225,12 @@ engines); use `Threads=1` if you need reproducible games.
 
 ## 6. Changelog (useless)
 
+* **2026-11-12** — real time management. A clock budget is now split into a
+  soft limit (stop starting iterations) and a hard limit (abort), derived from
+  the remaining clock, the increment and `movestogo`, with a stability-based
+  early stop and a scramble reserve. Previously the whole budget was used on
+  every move, so 2+1 and 40/15 were unplayable (40/15 at 30 s/move flagged
+  after 30 moves). Verified over 7 clock configurations with no forfeits.
 * **2026-11-12** — fixed depth-limited searches being cut off at 5 s.
   `go depth N` and `go mate N` now run to the requested depth; previously
   anything deeper than ~depth 18 was silently truncated at 5 s. Clock and
