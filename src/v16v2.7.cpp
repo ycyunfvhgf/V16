@@ -2317,15 +2317,16 @@ int main(int argc, char **argv) {
             }
         } else if (token == "go") {
             int depth = MAX_PLY;
+            bool depthGiven = false;   // "go depth"/"go mate": no wall-clock cap
             I64 tLimit = 0;
             I64 nodesLimit = -1;
             int mateIn = 0;
             int wtime = 0, btime = 0, winc = 0, binc = 0, movetime = 0, movestogo = 30;
             bool infinite = false;
             while (ss >> token) {
-                if (token == "depth") ss >> depth;
+                if (token == "depth") { ss >> depth; depthGiven = true; }
                 else if (token == "nodes") ss >> nodesLimit;
-                else if (token == "mate") ss >> mateIn;
+                else if (token == "mate") { ss >> mateIn; depthGiven = true; }
                 else if (token == "wtime") ss >> wtime;
                 else if (token == "btime") ss >> btime;
                 else if (token == "winc") ss >> winc;
@@ -2344,8 +2345,11 @@ int main(int argc, char **argv) {
                 if (tLimit > myT * 4 / 5) tLimit = myT * 4 / 5;
                 if (tLimit < 10) tLimit = 10;
             }
+            // A depth-limited search must not be cut short by a wall-clock cap:
+            // "go depth N" / "go mate N" run to that depth. Only a bare "go"
+            // (no depth, no nodes, no clock) falls back to 5 s.
             if (tLimit <= 0)
-                tLimit = (infinite || nodesLimit > 0) ? ((I64)1 << 50) : 5000;
+                tLimit = (infinite || nodesLimit > 0 || depthGiven) ? ((I64)1 << 50) : 5000;
             if (!nn.loaded) {
                 std::cout << "info string no net loaded - cannot search" << std::endl;
                 std::cout << "bestmove 0000" << std::endl;

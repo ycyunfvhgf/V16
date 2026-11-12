@@ -74,6 +74,20 @@ with `STATUS_ILLEGAL_INSTRUCTION` (`0xC000001D`); it never plays a move.
 Command line: `v16v2.7.exe [net.nnue]` forces a net from disk. Leave it out for
 normal use.
 
+### Search limits (`go`)
+
+| command | stops when |
+|---|---|
+| `go movetime M` | M ms elapsed (hard limit) |
+| `go wtime/btime/winc/binc/movestogo` | normal clock management; takes precedence over `depth` |
+| `go depth N` | depth N is reached — **no wall-clock cap**, however long that takes |
+| `go mate N` | mate in N is found (depth 2N), no wall-clock cap |
+| `go nodes N` | N nodes searched |
+| `go` (no arguments) | 5 s safety fallback |
+
+Depth- and mate-limited searches run to the requested depth even if that takes
+minutes, so fixed-depth testing is no longer silently truncated.
+
 ## 3. Opening books — CCRL
 
 **The engine has no internal book and never plays a book move.** That is
@@ -175,6 +189,12 @@ engines); use `Threads=1` if you need reproducible games.
 
 ## 6. Changelog (useless)
 
+* **2026-11-12** — fixed depth-limited searches being cut off at 5 s.
+  `go depth N` and `go mate N` now run to the requested depth; previously
+  anything deeper than ~depth 18 was silently truncated at 5 s. Clock and
+  `movetime` searches are unchanged, and a bare `go` still stops after 5 s.
+  All three binaries rebuilt; depth-16 node counts are unchanged, so the search
+  and eval are the same.
 * **2026-11-12** — added the two named ISA builds
   (`v16v2.7-avx2-bmi2-pext.exe`, `v16v2.7-avx512.exe`); verified functionally
   identical to each other and to `v16v2.7.exe`.
