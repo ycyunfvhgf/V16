@@ -4,16 +4,19 @@ Everything needed to run is in this folder. The NNUE weights are **linked into
 the executable**, so there is no `.nnue` file to ship, copy or configure.
 
 ```
-v16v2.7.exe          28,070,266 bytes — the engine, net linked in
-README.md            this file
-books/README.txt     drop CCRL's opening book here
-src/                 full C++ source + build script (not needed to run)
+v16v2.7-avx2-bmi2-pext.exe   28,070,266 B   AVX2 + BMI2 (PEXT), x86-64-v3  <- default
+v16v2.7-avx512.exe           28,082,554 B   AVX-512, x86-64-v4
+v16v2.7.exe                  28,070,266 B   same binary as the AVX2 build
+README.md                                  this file
+books/README.txt                           drop CCRL's opening book here
+src/                                       full C++ source + build script (not needed to run)
 ```
 
 * UCI id: `V16V2.7 Superhuman Pulsar` (author `v16`).
-* Platform: **Windows 10 or newer, x86-64**. **AVX2 required** (Intel Haswell 2013 /
-  AMD Excavator 2015 or newer); build target is `x86-64-v3`, so any AVX2 machine works.
-  No AVX-512.
+* Platform: **Windows 10 or newer, x86-64**, in two ISA flavours:
+  `avx2 ...` needs **AVX2 + BMI2 (PEXT)** — Intel Haswell 2013 / AMD Excavator 2015 or newer;
+  `... avx512` needs **AVX-512F/BW/DQ/VL** — Intel Skylake-SP/X 2017 or newer, AMD Zen 4 or newer.
+  No AVX-512 in the AVX2 build, no AVX2-only fallback for pre-2013 CPUs.
 * Runtime dependencies: **none to ship**. The only imports are `KERNEL32.dll`,
   `ntdll.dll` and the OS-provided UCRT (`api-ms-win-crt-*`), all present on Windows 10+.
   No Visual C++ redistributable, no installer, no registry writes, no temp files.
@@ -24,13 +27,41 @@ src/                 full C++ source + build script (not needed to run)
 
 ## 1. Quick start
 
-```
-v16v2.7.exe
+```bat
+v16v2.7-avx2-bmi2-pext.exe
+:: or, on AVX-512 hardware:
+v16v2.7-avx512.exe
 ```
 
 UCI only — the engine speaks UCI on stdin/stdout and expects a GUI or tournament
 manager to drive it. `info string ...` diagnostics go to **stderr**, so they never
 pollute the UCI stream.
+
+### Which binary to run
+
+| file | requires | CPUs |
+|---|---|---|
+| `v16v2.7-avx2-bmi2-pext.exe` | AVX2 + BMI2 (PEXT), `x86-64-v3` | Intel Haswell (2013)+, AMD Excavator/Zen+ |
+| `v16v2.7-avx512.exe` | AVX-512F/BW/DQ/VL, `x86-64-v4` | Intel Skylake-SP/X (2017)+, Ice Lake, Tiger Lake, AMD Zen 4+ |
+| `v16v2.7.exe` | identical to the AVX2 build | drop-in compatibility name for the web UI |
+
+**Use the AVX2 build unless you know the machine has AVX-512.** Same source,
+same net, same search, same strength to the node — the AVX-512 one only lets the
+compiler use 512-bit registers for the scalar parts of the code, so it is not
+stronger and may be slower on some AVX-512 CPUs that down-clock.
+
+On a CPU missing the required instructions Windows kills the process instantly
+with `STATUS_ILLEGAL_INSTRUCTION` (`0xC000001D`); it never plays a move.
+
+### How the binaries were verified
+
+* All three builds give identical score, PV, bestmove **and node counts** on
+  8 positions at depth 12.
+* The AVX-512 build cannot run on the build machine (i5-8500, no AVX-512 — it
+  aborts with `0xC000001D`, as expected), so it was validated under **Intel SDE**
+  emulating a Cannon Lake CPU. Compared against the AVX2 build under the same
+  emulator: 8/8 identical including node counts, so the code is functionally the
+  same, not merely "looks fine". Speed on real AVX-512 hardware is untested.
 
 ## 2. UCI options
 
@@ -109,6 +140,10 @@ cd src
 build_one_exe.cmd                       :: -> v16v2.7_all.exe, -march=x86-64-v3
 build_one_exe.cmd mynet.nnue out.exe    :: different net / output name
 build_one_exe.cmd v16v2.nnue out.exe native   :: tune for the build machine
+
+:: the two released ISA flavours
+build_one_exe.cmd v16v2.nnue ..\v16v2.7-avx2-bmi2-pext.exe x86-64-v3
+build_one_exe.cmd v16v2.nnue ..\v16v2.7-avx512.exe         x86-64-v4
 ```
 
 Equivalent manual command:
@@ -140,6 +175,9 @@ engines); use `Threads=1` if you need reproducible games.
 
 ## 6. Changelog (useless)
 
+* **2026-11-12** — added the two named ISA builds
+  (`v16v2.7-avx2-bmi2-pext.exe`, `v16v2.7-avx512.exe`); verified functionally
+  identical to each other and to `v16v2.7.exe`.
 * **2026-11-12** — rolled back to the 2026-11-07 search; the 2026-11-09
   overhaul (continuation history, SEE pruning, LMR on losing captures,
   check-extension 10/cap 2) measured ~16% lower NPS and was weaker in play.
