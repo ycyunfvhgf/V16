@@ -4,19 +4,21 @@ Everything needed to run is in this folder. The NNUE weights are **linked into
 the executable**, so there is no `.nnue` file to ship, copy or configure.
 
 ```
-current/
-  v16v2.7.exe          the engine (28 MB, self-contained, net embedded)
-  books/               drop CCRL's opening book here (see books/README.txt)
-  src/                 full C++ source + build script
-  README.md            this file
+v16v2.7.exe          28,070,266 bytes — the engine, net linked in
+README.md            this file
+books/README.txt     drop CCRL's opening book here
+src/                 full C++ source + build script (not needed to run)
 ```
 
-* UCI id: `V16V2.7 Superhuman Pulsar`
-* Platform: Windows x86-64, **AVX2 required** (Intel Haswell 2013 / AMD Excavator 2015 or newer).
-  Build target is `x86-64-v3`; it runs on any modern CCRL box. No AVX-512, no runtime DLLs
-  (only the Windows system libraries), no installer, no registry, no temp files.
-* No external data: the 25 MB net is in `.rdata`; 3-piece endgames
-  (KQK / KRK / KPK) are generated in-process on demand.
+* UCI id: `V16V2.7 Superhuman Pulsar` (author `v16`).
+* Platform: **Windows 10 or newer, x86-64**. **AVX2 required** (Intel Haswell 2013 /
+  AMD Excavator 2015 or newer); build target is `x86-64-v3`, so any AVX2 machine works.
+  No AVX-512.
+* Runtime dependencies: **none to ship**. The only imports are `KERNEL32.dll`,
+  `ntdll.dll` and the OS-provided UCRT (`api-ms-win-crt-*`), all present on Windows 10+.
+  No Visual C++ redistributable, no installer, no registry writes, no temp files.
+* No external data: the 25,168,960-byte net is in `.rdata`; 3-piece endgames
+  (KQK / KRK / KPK) are generated in-process on demand and reported as `tbhits`.
 
 ---
 
@@ -100,7 +102,7 @@ src/endgame_tb.h        KQK/KRK/KPK generator (compile-time include)
 src/build_one_exe.cmd   one-command build
 ```
 
-From a normal MinGW-w64 g++ 13+ on PATH:
+From a normal MinGW-w64 g++ 13 or newer on PATH (tested with 15.2.0):
 
 ```bat
 cd src
@@ -129,7 +131,9 @@ startpos, Hash 1024, one thread, `go movetime`:
 | 1 s | 14 | 23 | 706,527 |
 | 5 s | 18 | 29 | 4,126,243 |
 
-Rough NPS: ~4.7M single-thread, ~18M with 6 threads on an i5-8500.
+Rough NPS on an i5-8500 (6 cores): **~0.9M single-thread, ~4.7M with 6 threads**.
+The node counts above are repeatable to the node at `Threads=1`; wall-clock time
+and NPS vary with machine load, so only the node counts are used as a reference.
 
 Search is single-thread deterministic only with `Threads=1` (normal for SMP
 engines); use `Threads=1` if you need reproducible games.
