@@ -1330,7 +1330,10 @@ struct Search {
     std::unique_ptr<Worker[]> workers;
 
     Search() {
-        numThreads = detectCpuThreads();
+        // Ship single-threaded, like every other engine on the CCRL list: the
+        // engine only sees the machine's cores, not the cores it was allocated,
+        // so the test harness must opt in to more threads explicitly.
+        numThreads = 1;
         workers.reset(new Worker[MAX_THREADS]);
         for (int i = 0; i < MAX_THREADS; i++) {
             workers[i].S = this;
@@ -2286,8 +2289,8 @@ int main(int argc, char **argv) {
 
     Search search;
     search.ttResize(1024);
-    search.setThreads(detectCpuThreads());
-    std::cerr << "info string auto-detected " << search.numThreads << " threads" << std::endl;
+    search.setThreads(1);   // single-threaded by default; "setoption name Threads" opts in
+    std::cerr << "info string Threads default 1 (CPU has " << detectCpuThreads() << ")" << std::endl;
     NNUE nn;
     Board board;
     parseFEN(board, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
@@ -2337,15 +2340,18 @@ int main(int argc, char **argv) {
         if (token == "quit") { joinSearch(); break; }
         else if (token == "stop") { joinSearch(); }
         else if (token == "uci") {
-            int defThreads = detectCpuThreads();
+            int cpuThreads = detectCpuThreads();
             std::cout << "id name V16V2.7 Superhuman Pulsar\nid author v16\n"
                       << "option name Hash type spin default 1024 min 1 max 4096\n"
-                      << "option name Threads type spin default " << defThreads
+                      << "option name Threads type spin default 1"
                       << " min 1 max " << MAX_THREADS << "\n"
                       << "option name EvalFile type string default v16v2.nnue\n"
                       << "uciok" << std::endl;
-            std::cerr << "info string Threads auto-detected: " << search.numThreads
-                      << " (CPU has " << defThreads << ")" << std::endl;
+            // Single-threaded by default (like every CCRL engine); the harness
+            // opts in with "setoption name Threads". The CPU size is reported
+            // only as information.
+            std::cerr << "info string Threads default 1 (CPU has " << cpuThreads
+                      << ", raise via setoption)" << std::endl;
         } else if (token == "isready") {
             // May be sent during a search: answer immediately, but serialise the
             // write with the search thread's info output.

@@ -68,7 +68,7 @@ with `STATUS_ILLEGAL_INSTRUCTION` (`0xC000001D`); it never plays a move.
 | Option | Type | Default | Notes |
 |---|---|---|---|
 | `Hash` | spin | 1024 | MB, 1..4096 |
-| `Threads` | spin | auto (detected cores) | 1..32 |
+| `Threads` | spin | 1 | 1..32 |
 | `EvalFile` | string | `v16v2.nnue` | **Not needed.** Only used if you deliberately want to override the built-in net; if the named file does not exist the engine keeps the embedded net. |
 
 Command line: `v16v2.7.exe [net.nnue]` forces a net from disk. Leave it out for
@@ -231,6 +231,11 @@ engines); use `Threads=1` if you need reproducible games.
 
 ## 6. Changelog (useless)
 
+* **2026-11-13** — `Threads` now defaults to **1** instead of the detected core
+  count, matching every other CCRL engine. The engine can only see the machine,
+  not the cores it was allocated, so an auto-default could oversubscribe a
+  test box and make results meaningless. `setoption name Threads value N` still
+  works. Depth-16 node counts unchanged.
 * **2026-11-12** — criticality-aware time use. The move budget is stretched to
   1.30x / 1.60x / 2.00x when the best move is unstable, the evaluation just
   dropped by 90 cp, or the position is sharp (score within 120 cp of zero),
