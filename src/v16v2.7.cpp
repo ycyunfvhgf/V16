@@ -2024,23 +2024,45 @@ void Worker::idLoop(int maxD, const std::vector<U64> &gameHist, bool isMain) {
     I64 lastIterMs = 0;
     int stable = 0;                 // consecutive iterations with the same move
     Move lastBest; lastBest.from = lastBest.to = -1;
+    int scoreDrop = 0;              // how much the score fell last iteration
+
+    // Per-iteration "how critical is this position?" score, used to stretch the
+    // time budget when the position is unsettled. Only meaningful while the
+    // clock still has slack; fixed movetime/depth requests are not stretched.
+    auto criticality = [&](int depth) {
+        int crit = 0;
+        if (depth >= 9 && stable <= 1) crit++;              // best move keeps changing
+        if (depth >= 5 && scoreDrop >= 120) crit++;         // evaluation just dropped
+        if (depth >= 10 && std::abs(lastScore) <= 80) crit++; // balanced = sharp
+        return crit;
+    };
 
     for (int depth = startDepth; depth <= maxD; depth++) {
         rootDepth = depth;
         I64 elapsed0 = Search::nowMs() - S->startMs;
         if (depth > 1) {
             if (S->stop.load(std::memory_order_relaxed)) break;
+            const bool timed = S->hardMs > S->limitMs;
+            int crit = timed ? criticality(depth) : 0;
             // Soft limit: the point at which we stop *starting* new iterations.
-            // A best move that has survived several iterations is banked time.
+            // A best move that has survived several iterations is banked time,
+            // but a critical position gets that time back and then some.
             I64 soft = S->limitMs;
-            if (stable >= 3) soft = soft * 3 / 5;
+            if (timed) {
+                static const int mult[4] = {100, 120, 145, 175};   // percent
+                soft = soft * mult[crit] / 100;
+                I64 ceil = S->hardMs * 3 / 4;   // never plan past 75% of the cap
+                if (soft > ceil) soft = ceil;
+                if (stable >= 3) soft = soft * (crit ? 9 : 6) / 10;
+            } else if (stable >= 3) {
+                soft = soft * 3 / 5;
+            }
             if (elapsed0 >= soft) break;
             // Also refuse an iteration that cannot finish inside the hard cap:
-            // the next one usually costs 1.6-2.5x the previous one. Only for
-            // clock games — with "go movetime"/"go depth" soft == hard and the
-            // old abort-at-the-limit behaviour is what the caller asked for.
-            if (lastIterMs > 0 && S->hardMs > S->limitMs &&
-                elapsed0 + lastIterMs * 2 > S->hardMs) break;
+            // the next one usually costs 1.6-2.5x the previous one. A critical
+            // position is allowed to gamble a little more of the slack.
+            if (lastIterMs > 0 && timed &&
+                elapsed0 + lastIterMs * (crit ? 3 : 2) / (crit ? 2 : 1) > S->hardMs) break;
         }
         if (S->stop.load(std::memory_order_relaxed)) break;
         I64 iterStart = Search::nowMs();
@@ -2080,6 +2102,10 @@ void Worker::idLoop(int maxD, const std::vector<U64> &gameHist, bool isMain) {
         if (bm.from == bm.to) bm = bestRoot;
         if (bm.from == bm.to && depth > 1) break;
 
+        if (depth >= 5) {
+            int fall = lastScore - score;     // positive = evaluation got worse
+            scoreDrop = (fall > 0) ? fall : scoreDrop * 3 / 4;
+        }
         lastScore = score;
         bestScoreRoot = score;
         bestRoot = bm;
