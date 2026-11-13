@@ -2055,8 +2055,8 @@ void Worker::idLoop(int maxD, const std::vector<U64> &gameHist, bool isMain) {
     auto criticality = [&](int depth) {
         int crit = 0;
         if (depth >= 9 && stable <= 1) crit++;              // best move keeps changing
-        if (depth >= 5 && scoreDrop >= 120) crit++;         // evaluation just dropped
-        if (depth >= 10 && std::abs(lastScore) <= 80) crit++; // balanced = sharp
+        if (depth >= 5 && scoreDrop >= 90) crit++;          // evaluation just dropped
+        if (depth >= 10 && std::abs(lastScore) <= 120) crit++; // balanced = sharp
         return crit;
     };
 
@@ -2072,11 +2072,11 @@ void Worker::idLoop(int maxD, const std::vector<U64> &gameHist, bool isMain) {
             // but a critical position gets that time back and then some.
             I64 soft = S->limitMs;
             if (timed) {
-                static const int mult[4] = {100, 120, 145, 175};   // percent
+                static const int mult[4] = {100, 130, 160, 200};   // percent
                 soft = soft * mult[crit] / 100;
-                I64 ceil = S->hardMs * 3 / 4;   // never plan past 75% of the cap
+                I64 ceil = S->hardMs * 4 / 5;   // never plan past 80% of the cap
                 if (soft > ceil) soft = ceil;
-                if (stable >= 3) soft = soft * (crit ? 9 : 6) / 10;
+                if (stable >= 3) soft = soft * (crit ? 19 : 15) / 20;
             } else if (stable >= 3) {
                 soft = soft * 3 / 5;
             }

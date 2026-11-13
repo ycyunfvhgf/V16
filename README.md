@@ -111,12 +111,12 @@ Then, in the search:
 * a new iteration is not started once the soft limit is spent, nor if
   `elapsed + 2 * lastIteration` would cross the hard limit;
 * the budget is stretched when the position is unsettled — the best move has
-  changed in the last two iterations, the evaluation just fell by 120 cp or
+  changed in the last two iterations, the evaluation just fell by 90 cp or
   more, or the score is close to zero (sharp position). One, two or three of
-  those raise the soft limit to 1.20x / 1.45x / 1.75x, capped at 75% of the hard
-  limit, so a critical move can think roughly twice as long as a quiet one;
+  those raise the soft limit to 1.30x / 1.60x / 2.00x, capped at 80% of the hard
+  limit, so a critical move can think twice as long as a quiet one;
 * a quiet position where the best move has been unchanged for 3 iterations gets
-  the soft limit cut to 60% (90% if the position is critical), deliberately
+  the soft limit cut to 75% (95% if the position is critical), deliberately
   banking time for later;
 * below 200 ms left the engine spends a small fixed slice (`avail/8`) instead of
   a share, so it can never gamble the whole clock;
@@ -232,10 +232,11 @@ engines); use `Threads=1` if you need reproducible games.
 ## 6. Changelog (useless)
 
 * **2026-11-12** — criticality-aware time use. The move budget is stretched to
-  1.2x / 1.45x / 1.75x when the best move is unstable, the evaluation just
-  dropped by 120 cp, or the position is sharp (score near zero), capped at 75%
-  of the hard limit; quiet, stable positions still bank time. Verified over 7
-  clock configurations with no forfeits; depth-16 node counts unchanged.
+  1.30x / 1.60x / 2.00x when the best move is unstable, the evaluation just
+  dropped by 90 cp, or the position is sharp (score within 120 cp of zero),
+  capped at 80% of the hard limit; quiet, stable positions still bank time.
+  Verified over 7 clock configurations with no forfeits; depth-16 node counts
+  unchanged.
 * **2026-11-12** — real time management. A clock budget is now split into a
   soft limit (stop starting iterations) and a hard limit (abort), derived from
   the remaining clock, the increment and `movestogo`, with a stability-based
