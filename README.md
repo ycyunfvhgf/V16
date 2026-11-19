@@ -1,4 +1,4 @@
-# V16 V2.7 — single-file UCI engine
+# V16 V2.7 — single-file UCI engine. Etched, Sketched, Designed, Engineered by Felix Wang.
 
 Everything needed to run is in this folder. The NNUE weights are **linked into
 the executable**, so there is no `.nnue` file to ship, copy or configure.
