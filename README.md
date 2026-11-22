@@ -9,7 +9,11 @@ No permission is granted to copy, redistribute,
 or publish this project's source code without
 prior written permission from the copyright holder.
 
-Etched, Sketched, Designed, Engineered by Felix Wang. Thank you for using V16.
+
+
+
+##Etched, Sketched, Designed, Engineered by Felix Wang. 
+Thank you for using V16.
 
 
 Everything needed to run is in this folder. The NNUE weights are **linked into
