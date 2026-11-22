@@ -1,5 +1,14 @@
 # V16 V2.7 — single-file UCI engine.
 
+V16 Chess Engine
+Copyright © 2026 V16 Project
+
+All rights reserved.
+
+No permission is granted to copy, redistribute,
+or publish this project's source code without
+prior written permission from the copyright holder.
+
 Etched, Sketched, Designed, Engineered by Felix Wang. Thank you for using V16.
 
 
